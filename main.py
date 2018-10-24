@@ -1,19 +1,26 @@
+#!/usr/bin/env python3
 import pygame
 from pygame.locals import *
 import os
 import random
 import time
+import pickle
 
+try:
+    from pyautogui import size
+    display_w = size()[0]
+except ModuleNotFoundError:
+    display_w = 1440
 
 GAME_NAME = "StickRun"
 GAME_VER = "0.1"
-RES = "res"
+RES = os.path.join(os.path.dirname(os.path.realpath(__file__)), "res")
 
 
 pygame.init()
 
 
-display_w, display_h = (1440, 144)
+display_h = 205
 
 display = pygame.display.set_mode((display_w, display_h))
 pygame.display.set_caption(GAME_NAME + GAME_VER)
@@ -47,6 +54,105 @@ FONT = pygame.font.Font(None, 24)
 
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
+
+
+class Slider:
+    HEIGHT = 14
+    GAP = 20
+    WIDTH = display_w - 2 * GAP
+
+    active = None
+    family = []
+
+    def __init__(self, text, min_val, max_val, def_val):
+        self.text = text
+        self.min_val = min_val
+        self.max_val = max_val
+        self.def_val = def_val
+        self.pos_val = def_val
+        Slider.family.append(self)
+        if Slider.active is None:
+            Slider.active = self
+
+    def _show(self, display, y):
+        fraction = (self.pos_val - self.min_val) / (self.max_val - self.min_val)
+        x = Slider.GAP
+        frame = pygame.Rect(x, y, Slider.WIDTH, Slider.HEIGHT)
+        fill = pygame.Rect(x, y, fraction * Slider.WIDTH, Slider.HEIGHT)
+        pygame.draw.rect(display, BLACK, frame, 2)
+        pygame.draw.rect(display, BLACK, fill)
+        if Slider.active is self:
+            msg = "changing " + self.text + " - " + str(self.pos_val)
+            message(display, msg, -2, y + Slider.HEIGHT)
+        message(display, str(self.min_val), 0, y)
+        message(display, str(self.max_val), -1, y)
+
+    def change(self, dir):
+        if dir == K_LEFT:
+            if self.pos_val > self.min_val:
+                self.pos_val -= 1
+        elif dir == K_RIGHT:
+            if self.pos_val < self.max_val:
+                self.pos_val += 1
+
+    @classmethod
+    def focus(cls, move):
+        if move == K_DOWN:
+            index = cls.family.index(cls.active)
+            if index < len(cls.family) - 1:
+                index += 1
+            else:
+                index = 0
+        elif move == K_UP:
+            index = cls.family.index(cls.active)
+            if index > 0:
+                index -= 1
+            else:
+                index = len(cls.family) - 1
+        cls.active = cls.family[index]
+
+    @classmethod
+    def reset(cls):
+        for obj in cls.family:
+            obj.pos_val = obj.def_val
+
+    @classmethod
+    def show(cls, display, top):
+        y = top
+        for obj in cls.family:
+            obj._show(display, y)
+            y += Slider.HEIGHT + Slider.GAP
+
+
+class File:
+    CHARACTER = os.path.join(RES, "character.p")
+
+    @classmethod
+    def load(cls):
+        dic = {}
+        for obj in Slider.family:
+            dic[obj.text] = obj.pos_val
+        Stick.INIT_SPEED_X = dic["run speed"]
+        Stick.JUMP_SPEED = dic["jump power"]
+        Stick.DOWN_SPEED_X = dic["crouch speed"]
+
+    @classmethod
+    def read(cls):
+        try:
+            with open(cls.CHARACTER, "rb") as f:
+                Slider.family = pickle.load(f)
+                Slider.active = Slider.family[0]
+        except Exception as e:
+            # create sliders for character modification
+            Slider("run speed", 8, 20, 10)
+            Slider("jump power", 8, 15, 10)
+            Slider("crouch speed", 2, 8, 5)
+            message(display, "Error loading game data", -1, 0)
+
+    @classmethod
+    def write(cls):
+        with open(cls.CHARACTER, "wb") as f:
+            pickle.dump(Slider.family, f)
 
 
 class Obstacle:
@@ -126,10 +232,13 @@ class Stick:
 
     def score():
         doc = "The score property."
+
         def fget(self):
             return round(self._score, 2)
+
         def fset(self, value):
             self._score = value
+
         def fdel(self):
             del self._score
         return locals()
@@ -198,19 +307,35 @@ class Stick:
                 stick.act = "jump"
 
 
-def message(display, text, x, y):
+def message(display, text, x, y, fill=False):
     bit_map = FONT.render(text, True, BLACK)
-    display.blit(bit_map, (x, y))
+    rect = bit_map.get_rect()
+    if x >= 0:
+        rect.left, rect.top = x, y
+    else:
+            if x == -1:
+                rect.right = display_w
+                rect.top = y
+            elif x == -2:
+                rect.center = (display_w / 2, 0)
+                rect.top = y
+    if fill:
+        pygame.draw.rect(display, WHITE, rect)
+    display.blit(bit_map, rect)
 
 
 def start():
+    File.read()
+
     display.fill(WHITE)
-    message(display, "Jump - UP or SPACE", 0, 0)
-    message(display, "Crouch - DOWN", 0, 20)
-    message(display, "Press SPACE to start!", 0, 40)
-    pygame.display.flip()
 
     while True:
+        message(display, "Jump - UP or SPACE", -2, 0, True)
+        message(display, "Crouch - DOWN", -2, 20, True)
+        message(display, "Press SPACE to start!", -2, 40, True)
+        message(display, "Press C to modify character!", -2, 60, True)
+        message(display, "Press Q to quit!", -2, 80, True)
+        pygame.display.flip()
 
         for event in pygame.event.get():
             if event.type == QUIT:
@@ -220,8 +345,49 @@ def start():
                     quit_all()
                 elif event.key == K_SPACE:
                     main()
+                elif event.key == K_c:
+                    character()
 
         clock.tick(FPS)
+
+
+def character():
+    # loop
+    while True:
+        display.fill(WHITE)
+        message(display, "Arrow keys - adjust values; D - reset default", 0, 0)
+        message(display, "Any other key to save and return!", 0, 20)
+        Slider.show(display, 40)
+        pygame.display.flip()
+
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                quit_all()
+            elif event.type == KEYDOWN:
+                if event.key == K_UP or event.key == K_DOWN:
+                    Slider.focus(event.key)
+                elif event.key == K_LEFT or event.key == K_RIGHT:
+                    Slider.active.change(event.key)
+                elif event.key == K_d:
+                    Slider.reset()
+                else:
+                    File.load()
+                    display.fill(WHITE)
+                    return
+
+        clock.tick(FPS)
+
+
+def pause():
+    while True:
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                quit_all()
+            elif event.type == KEYDOWN:
+                if event.key == K_q:
+                    quit_all()
+                if event.key == K_p:
+                    return
 
 
 def main():
@@ -231,7 +397,7 @@ def main():
 
     while True:
         if Stick.crashed():
-            message(display, "Press SPACE to start!", 0, 20)
+            message(display, "Press SPACE to retry!", 0, 20, True)
             pygame.display.flip()
             return
 
@@ -241,6 +407,8 @@ def main():
             elif event.type == KEYDOWN:
                 if event.key == K_q:
                     quit_all()
+                if event.key == K_p:
+                    pause()
 
         key_press = pygame.key.get_pressed()
         if key_press[K_DOWN]:
@@ -253,7 +421,8 @@ def main():
             if "run" in stick.act:
                 stick.act = "jump"
 
-        # Stick.ai()
+        if key_press[K_CAPSLOCK]:
+            Stick.ai()
 
         Obstacle.renew()
         stick.renew()
@@ -262,13 +431,14 @@ def main():
         Obstacle.show(display)
         stick.show(display)
         score = "You've traveled {} screen width!".format(Stick.active.score)
-        message(display, score, 0, 0)
+        message(display, score, 0, 0, True)
 
         pygame.display.flip()
         clock.tick(FPS)
 
 
 def quit_all():
+    File.write()
     pygame.quit()
     quit()
 
