@@ -303,7 +303,7 @@ class Stick:
     def ai(cls):
         stick = cls.active
         for obj in Obstacle.family:
-            if 0 < obj.rect.left - stick.rect.left <= 100:
+            if 0 < obj.rect.left - stick.rect.left <= 110:
                 stick.act = "jump"
 
 
