@@ -33,7 +33,8 @@ cactus_img = pygame.image.load(os.path.join(RES, "cactus.png"))
 stabs_img = pygame.image.load(os.path.join(RES, "stabs.png"))
 zombie_img = pygame.image.load(os.path.join(RES, "zombie_hole.png"))
 zombie_pop_up = pygame.image.load(os.path.join(RES, "zombie.png"))
-obstacle_img = [cactus_img, stabs_img, zombie_img]
+rocket_img = pygame.image.load(os.path.join(RES, "rocket.png"))
+obstacle_img = [cactus_img, stabs_img, zombie_img, rocket_img]
 
 # stick images
 stick_run_1_img = pygame.image.load(os.path.join(RES, "stick_run_1.png"))
@@ -173,7 +174,7 @@ class Obstacle:
     def _move(self):
         # move
         if hasattr(self, "speed"):
-            self.rect.left -= Stick.active.speed_x + obj.speed
+            self.rect.left -= Stick.active.speed_x + self.speed
         else:
             self.rect.left -= Stick.active.speed_x
         # eliminate
@@ -190,11 +191,16 @@ class Obstacle:
     @classmethod
     def renew(cls):
         # spawn
-        spawn_limit = Stick.JUMP_SPEED / Stick.GRAVITY * 2 / FPS + 0.1
+        spawn_limit = Stick.JUMP_SPEED / Stick.GRAVITY * 2.4 / FPS + 0.3
         gap_time = time.time() - cls.spawn_time
         if gap_time >= spawn_limit:
             if random.random() <= 0.05:
-                cls(random.choice(obstacle_img))
+                img = random.choice(obstacle_img)
+                ref = cls(img)
+                if img is rocket_img:
+                    ref.speed = Stick.active.speed_x
+                    ref.rect.top = display_h - cls.ground_h - 65
+
         # move all
         for obj in cls.family:
             obj._move()
@@ -219,6 +225,7 @@ class Stick:
     active = None
 
     def __init__(self, img):
+        self._ai_down_delay = 0
         self._pose = 0
         self._score = 0
         self.speed_x = Stick.INIT_SPEED_X
@@ -256,6 +263,7 @@ class Stick:
 
     def jump(self):
         if self.speed_y is None:
+            self.speed_x = Stick.INIT_SPEED_X
             self.speed_y = Stick.JUMP_SPEED
         self.rect.top -= self.speed_y
         self.speed_y -= Stick.GRAVITY
@@ -302,9 +310,17 @@ class Stick:
     @classmethod
     def ai(cls):
         stick = cls.active
+        rocket_limit = stick.speed_x * 5
         for obj in Obstacle.family:
             if 0 < obj.rect.left - stick.rect.left <= 110:
-                stick.act = "jump"
+                if obj.image is not rocket_img:
+                    stick.act = "jump"
+            if 0 < obj.rect.left - stick.rect.left <= rocket_limit:
+                if obj.image is rocket_img and stick.act is not "jump":
+                    stick._ai_down_delay = 3
+        if stick._ai_down_delay > 0:
+            stick._ai_down_delay -= 1
+            stick.act = "down1"
 
 
 def message(display, text, x, y, fill=False):
@@ -347,6 +363,8 @@ def start():
                     main()
                 elif event.key == K_c:
                     character()
+                if event.key == K_m:
+                    pygame.display.iconify()
 
         clock.tick(FPS)
 
@@ -364,7 +382,9 @@ def character():
             if event.type == QUIT:
                 quit_all()
             elif event.type == KEYDOWN:
-                if event.key == K_UP or event.key == K_DOWN:
+                if event.key == K_m:
+                    pygame.display.iconify()
+                elif event.key == K_UP or event.key == K_DOWN:
                     Slider.focus(event.key)
                 elif event.key == K_LEFT or event.key == K_RIGHT:
                     Slider.active.change(event.key)
@@ -379,6 +399,10 @@ def character():
 
 
 def pause():
+    message(display, "Paused!", -1, 0)
+    message(display, "Press P to unpause!", -1, 20)
+    pygame.display.flip()
+
     while True:
         for event in pygame.event.get():
             if event.type == QUIT:
@@ -388,6 +412,11 @@ def pause():
                     quit_all()
                 if event.key == K_p:
                     return
+                if event.key == K_m:
+                    pygame.display.iconify()
+            elif event.type == ACTIVEEVENT:
+                if event.gain:
+                    pygame.display.flip()
 
 
 def main():
@@ -409,15 +438,20 @@ def main():
                     quit_all()
                 if event.key == K_p:
                     pause()
+                if event.key == K_m:
+                    pygame.display.iconify()
+
+        if not pygame.display.get_active():
+            pause()
 
         key_press = pygame.key.get_pressed()
-        if key_press[K_DOWN]:
+        if key_press[K_DOWN] or key_press[K_l]:
             if "run" in stick.act:
                 stick.act = "down1"
         else:
             if "down" in stick.act:
                 stick.act = "run1"
-        if key_press[K_SPACE] or key_press[K_UP]:
+        if key_press[K_SPACE] or key_press[K_UP] or key_press[K_o]:
             if "run" in stick.act:
                 stick.act = "jump"
 
