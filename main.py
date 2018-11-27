@@ -1,480 +1,391 @@
-#!/usr/bin/env python3
-import pygame
-from pygame.locals import *
 import os
 import random
-import time
-import pickle
+import sys
 
-try:
-    from pyautogui import size
-    display_w = size()[0]
-except ModuleNotFoundError:
-    display_w = 1440
+import pygame
+from pygame.locals import *
 
-GAME_NAME = "StickRun"
-GAME_VER = "0.1"
+# pygame constants
+WIDTH = 960
+HEIGHT = 240
+FPS = 60
+ANIMATE = 5
 RES = os.path.join(os.path.dirname(os.path.realpath(__file__)), "res")
 
 
+def res(file_name):
+    return os.path.join(RES, file_name)
+
+
+# define colors
+ALPHA = (255, 255, 255, 255)
+WHITE = (255, 255, 255)
+GREY = (155, 155, 155)
+BLACK = (0, 0, 0)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLUE = (0, 0, 255)
+TRANSP_YELLOW = (255, 255, 102, 168)
+SKY = (153, 221, 255)
+DIRT = (153, 102, 51)
+DEEP_DIRT = (115, 77, 38)
+
+# game constants
+RUN = 0
+DOWN = 1
+JUMP = 2
+
+DOWN_SPEED = 5
+RUN_SPEED = 10
+
+GROUND_H = 30
+GRAVITY = 1
+
+BLOCK_GAP_LIMIT = 240
+
+# initialize pygame and create window
 pygame.init()
-
-
-display_h = 205
-
-display = pygame.display.set_mode((display_w, display_h))
-pygame.display.set_caption(GAME_NAME + GAME_VER)
-
-icon_img = pygame.image.load(os.path.join(RES, "icon.png"))
-pygame.display.set_icon(icon_img)
-
-# obstacle images
-cactus_img = pygame.image.load(os.path.join(RES, "cactus.png"))
-stabs_img = pygame.image.load(os.path.join(RES, "stabs.png"))
-zombie_img = pygame.image.load(os.path.join(RES, "zombie_hole.png"))
-zombie_pop_up = pygame.image.load(os.path.join(RES, "zombie.png"))
-rocket_img = pygame.image.load(os.path.join(RES, "rocket.png"))
-obstacle_img = [cactus_img, stabs_img, zombie_img, rocket_img]
-
-# stick images
-stick_run_1_img = pygame.image.load(os.path.join(RES, "stick_run_1.png"))
-stick_run_2_img = pygame.image.load(os.path.join(RES, "stick_run_2.png"))
-stick_jump_img = pygame.image.load(os.path.join(RES, "stick_jump.png"))
-stick_down_1_img = pygame.image.load(os.path.join(RES, "stick_down_1.png"))
-stick_down_2_img = pygame.image.load(os.path.join(RES, "stick_down_2.png"))
-stick_img = {"run1": stick_run_1_img,
-             "run2": stick_run_2_img,
-             "jump": stick_jump_img,
-             "down1": stick_down_1_img,
-             "down2": stick_down_2_img}
+pygame.mixer.init()
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+screen.fill(WHITE)
+pygame.display.set_caption("My Game")
 
 clock = pygame.time.Clock()
-FPS = 40
 
-FONT = pygame.font.Font(None, 24)
+# font
+SIGN_FONT = pygame.font.Font(None, 20)
+TITLE_FONT = pygame.font.Font(None, 65)
+NORMAL_FONT = pygame.font.Font(None, 30)
 
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-
-
-class Slider:
-    HEIGHT = 14
-    GAP = 20
-    WIDTH = display_w - 2 * GAP
-
-    active = None
-    family = []
-
-    def __init__(self, text, min_val, max_val, def_val):
-        self.text = text
-        self.min_val = min_val
-        self.max_val = max_val
-        self.def_val = def_val
-        self.pos_val = def_val
-        Slider.family.append(self)
-        if Slider.active is None:
-            Slider.active = self
-
-    def _show(self, display, y):
-        fraction = (self.pos_val - self.min_val) / (self.max_val - self.min_val)
-        x = Slider.GAP
-        frame = pygame.Rect(x, y, Slider.WIDTH, Slider.HEIGHT)
-        fill = pygame.Rect(x, y, fraction * Slider.WIDTH, Slider.HEIGHT)
-        pygame.draw.rect(display, BLACK, frame, 2)
-        pygame.draw.rect(display, BLACK, fill)
-        if Slider.active is self:
-            msg = "changing " + self.text + " - " + str(self.pos_val)
-            message(display, msg, -2, y + Slider.HEIGHT)
-        message(display, str(self.min_val), 0, y)
-        message(display, str(self.max_val), -1, y)
-
-    def change(self, dir):
-        if dir == K_LEFT:
-            if self.pos_val > self.min_val:
-                self.pos_val -= 1
-        elif dir == K_RIGHT:
-            if self.pos_val < self.max_val:
-                self.pos_val += 1
-
-    @classmethod
-    def focus(cls, move):
-        if move == K_DOWN:
-            index = cls.family.index(cls.active)
-            if index < len(cls.family) - 1:
-                index += 1
-            else:
-                index = 0
-        elif move == K_UP:
-            index = cls.family.index(cls.active)
-            if index > 0:
-                index -= 1
-            else:
-                index = len(cls.family) - 1
-        cls.active = cls.family[index]
-
-    @classmethod
-    def reset(cls):
-        for obj in cls.family:
-            obj.pos_val = obj.def_val
-
-    @classmethod
-    def show(cls, display, top):
-        y = top
-        for obj in cls.family:
-            obj._show(display, y)
-            y += Slider.HEIGHT + Slider.GAP
+# load images
+sign_img = pygame.image.load(res("sign.png"))
+stick_img = {RUN: (pygame.image.load(res("stick_run_1.png")),
+                   pygame.image.load(res("stick_run_2.png"))),
+             DOWN: (pygame.image.load(res("stick_down_1.png")),
+                    pygame.image.load(res("stick_down_2.png"))),
+             JUMP: pygame.image.load(res("stick_jump.png"))}
+cactus_img = pygame.image.load(res("cactus.png"))
 
 
-class File:
-    CHARACTER = os.path.join(RES, "character.p")
+class GameObj(pygame.sprite.Sprite):
 
-    @classmethod
-    def load(cls):
-        dic = {}
-        for obj in Slider.family:
-            dic[obj.text] = obj.pos_val
-        Stick.INIT_SPEED_X = dic["run speed"]
-        Stick.JUMP_SPEED = dic["jump power"]
-        Stick.DOWN_SPEED_X = dic["crouch speed"]
+    all = pygame.sprite.RenderUpdates()
 
-    @classmethod
-    def read(cls):
-        try:
-            with open(cls.CHARACTER, "rb") as f:
-                Slider.family = pickle.load(f)
-                Slider.active = Slider.family[0]
-        except Exception as e:
-            # create sliders for character modification
-            Slider("run speed", 8, 20, 10)
-            Slider("jump power", 8, 15, 10)
-            Slider("crouch speed", 2, 8, 5)
-            message(display, "Error loading game data", -1, 0)
-
-    @classmethod
-    def write(cls):
-        with open(cls.CHARACTER, "wb") as f:
-            pickle.dump(Slider.family, f)
+    def __init__(self):
+        super().__init__()
+        GameObj.all.add(self)
 
 
-class Obstacle:
-    ground_h = 20
-    ground_scroll = 0
+class Sign(GameObj):
 
-    spawn_time = time.time()
-    family = []
+    all = pygame.sprite.Group()
 
-    def __init__(self, img):
-        self.image = img
-        rect = img.get_rect()
-        rect.left, rect.bottom = display_w, display_h - Obstacle.ground_h
-        self.rect = rect
-        Obstacle.family.append(self)
-        Obstacle.spawn_time = time.time()
-
-    def _move(self):
-        # move
-        if hasattr(self, "speed"):
-            self.rect.left -= Stick.active.speed_x + self.speed
+    def __init__(self, text):
+        super().__init__()
+        self.image = sign_img
+        bit_map = SIGN_FONT.render(text, True, WHITE)
+        text_rect = bit_map.get_rect()
+        text_rect.center = 25, 12
+        self.image.blit(bit_map, text_rect)
+        self.rect = self.image.get_rect()
+        self.rect.bottom = HEIGHT - GROUND_H
+        if text != "START":
+            self.rect.left = WIDTH
         else:
-            self.rect.left -= Stick.active.speed_x
-        # eliminate
+            self.rect.left = 10
+
+    def update(self):
+        self.rect.move_ip(-Player.SPEED, 0)
+        if self.rect.right < 0:
+            self.kill()
+
+
+class Ground(GameObj):
+
+    all = pygame.sprite.Group()
+
+    def __init__(self):
+        super().__init__()
+        self.image = pygame.Surface((WIDTH, GROUND_H))
+        self.rect = self.image.get_rect()
+        self.rect.bottom = HEIGHT
+        x_disp = len(Ground.all.sprites()) * WIDTH
+        self.rect.move_ip(x_disp, 0)
+        self.gene()
+        Ground.all.add(self)
+
+    def gene(self):
+        self.image.fill(DIRT)
+        for dot_y in range(0, 10):
+            gradient = mix_color(DIRT, GREY, dot_y / 10)
+            pygame.draw.line(self.image, gradient, (0, dot_y), (WIDTH, dot_y), 1)
+        for dot_x in range(0, WIDTH):
+            if random.random() < 0.1:
+                dot_y = random.randint(10, GROUND_H)
+                size = random.randint(1, 5)
+                pygame.draw.circle(self.image, DEEP_DIRT, (dot_x, dot_y), size)
+
+    def update(self):
+        self.rect.move_ip(-Player.SPEED, 0)
         if self.rect.right <= 0:
-            Obstacle.family.remove(self)
-            del self
-
-    def _show(self, display):
-        if self.image == zombie_img:
-            if self.rect.left - Stick.active.rect.right <= 150:
-                self.image = zombie_pop_up
-        display.blit(self.image, self.rect)
-
-    @classmethod
-    def renew(cls):
-        # spawn
-        spawn_limit = Stick.JUMP_SPEED / Stick.GRAVITY * 2.4 / FPS + 0.3
-        gap_time = time.time() - cls.spawn_time
-        if gap_time >= spawn_limit:
-            if random.random() <= 0.05:
-                img = random.choice(obstacle_img)
-                ref = cls(img)
-                if img is rocket_img:
-                    ref.speed = Stick.active.speed_x
-                    ref.rect.top = display_h - cls.ground_h - 65
-
-        # move all
-        for obj in cls.family:
-            obj._move()
-
-    @classmethod
-    def show(cls, display):
-        pygame.draw.line(display,
-                         BLACK,
-                         (0, display_h - Obstacle.ground_h),
-                         (display_w, display_h - Obstacle.ground_h))
-        for obj in cls.family:
-            obj._show(display)
+            self.rect.left = WIDTH
+            self.gene()
 
 
-class Stick:
-    FIXED_X = 100
-    INIT_SPEED_X = 10
-    DOWN_SPEED_X = 5
-    JUMP_SPEED = 10
-    GRAVITY = 1
+class Block(GameObj):
+    last = 0
 
-    active = None
+    all = pygame.sprite.Group()
 
     def __init__(self, img):
-        self._ai_down_delay = 0
-        self._pose = 0
-        self._score = 0
-        self.speed_x = Stick.INIT_SPEED_X
-        self.speed_y = None
-        self.img = img
-        self.act = "run1"
-        rect = img[self.act].get_rect()
-        rect.left, rect.bottom = Stick.FIXED_X, display_h - Obstacle.ground_h
-        self.rect = rect
-        Stick.active = self
+        super().__init__()
+        pile = choose({1: 0.5, 2: 0.35, 3: 0.15})
+        single_width = img.get_width()
+        single_height = img.get_height()
+        self.image = pygame.Surface((single_width, single_height * pile), SRCALPHA)
+        for i in range(0, pile):
+            self.image.blit(img, (0, i * single_height))
+        self.rect = self.image.get_rect()
+        self.rect.left = WIDTH
+        self.rect.bottom = HEIGHT - GROUND_H
+        Block.last = 0
+        Block.all.add(self)
 
-    def score():
-        doc = "The score property."
-
-        def fget(self):
-            return round(self._score, 2)
-
-        def fset(self, value):
-            self._score = value
-
-        def fdel(self):
-            del self._score
-        return locals()
-    score = property(**score())
-
-    def run(self):
-        self.speed_x = Stick.INIT_SPEED_X
-        if self.act == "run1" and self._pose >= 3:
-            self.act = "run2"
-            self._pose = 0
-        elif self.act == "run2" and self._pose >= 3:
-            self.act = "run1"
-            self._pose = 0
-        self._pose += 1
-
-    def jump(self):
-        if self.speed_y is None:
-            self.speed_x = Stick.INIT_SPEED_X
-            self.speed_y = Stick.JUMP_SPEED
-        self.rect.top -= self.speed_y
-        self.speed_y -= Stick.GRAVITY
-        if self.rect.bottom >= display_h - Obstacle.ground_h:
-            self.speed_y = None
-            self.act = "run1"
-
-    def down(self):
-        if self.speed_x == Stick.INIT_SPEED_X:
-            self.speed_x = Stick.DOWN_SPEED_X
-        if self.act == "down1" and self._pose >= 4:
-            self.act = "down2"
-            self._pose = 0
-        elif self.act == "down2" and self._pose >= 4:
-            self.act = "down1"
-            self._pose = 0
-        self._pose += 1
-
-    def renew(self):
-        if "run" in self.act:
-            self.run()
-        elif self.act == "jump":
-            self.jump()
-        elif "down" in self.act:
-            self.down()
-        img_wh = self.img[self.act].get_rect()
-        self.rect.width, self.rect.height = img_wh.width, img_wh.height
-        if self.act != "jump":
-            self.rect.bottom = display_h - Obstacle.ground_h
-        self.score += self.speed_x / display_w
-
-    def show(self, display):
-        display.blit(self.img[self.act], self.rect)
+    def update(self):
+        self.rect.move_ip(-Player.SPEED, 0)
+        if self.rect.right < 0:
+            self.kill()
 
     @classmethod
-    def crashed(cls):
-        rect = cls.active.rect
-        for obj in Obstacle.family:
-            if rect.colliderect(obj.rect):
-                return True
-        else:
-            return False
-
-    @classmethod
-    def ai(cls):
-        stick = cls.active
-        rocket_limit = stick.speed_x * 5
-        for obj in Obstacle.family:
-            if 0 < obj.rect.left - stick.rect.left <= 110:
-                if obj.image is not rocket_img:
-                    stick.act = "jump"
-            if 0 < obj.rect.left - stick.rect.left <= rocket_limit:
-                if obj.image is rocket_img and stick.act is not "jump":
-                    stick._ai_down_delay = 3
-        if stick._ai_down_delay > 0:
-            stick._ai_down_delay -= 1
-            stick.act = "down1"
+    def gene(cls):
+        if cls.last > BLOCK_GAP_LIMIT:
+            if len(cls.all.sprites()) == 0:
+                cls(cactus_img)
+            elif len(cls.all.sprites()) < 3:
+                if random.random() < 0.01:
+                    cls(cactus_img)
+        cls.last += Player.SPEED
 
 
-def message(display, text, x, y, fill=False):
-    bit_map = FONT.render(text, True, BLACK)
-    rect = bit_map.get_rect()
-    if x >= 0:
-        rect.left, rect.top = x, y
-    else:
-            if x == -1:
-                rect.right = display_w
-                rect.top = y
-            elif x == -2:
-                rect.center = (display_w / 2, 0)
-                rect.top = y
-    if fill:
-        pygame.draw.rect(display, WHITE, rect)
-    display.blit(bit_map, rect)
+class Player(GameObj):
+
+    SPEED = 0
+    X_OFFSET = 100
+    JUMP_POWER = 12
+
+    r = None
+    pause = False
+
+    def __init__(self):
+        super().__init__()
+        self._state = RUN
+        self._img_index = 0
+        self._speed_y = 0
+        self.image = stick_img[RUN][0]
+        self.rect = self.image.get_rect()
+        self.rect.bottom = HEIGHT - GROUND_H
+        self.rect.centerx = Player.X_OFFSET
+        self.distance = 0
+        Player.r = self
+
+    def update(self):
+
+        # control
+        if self._state != JUMP:
+            if key_state[K_UP]:
+                self._state = JUMP
+                self._speed_y = Player.JUMP_POWER
+            elif key_state[K_DOWN]:
+                self._state = DOWN
+                Player.SPEED = DOWN_SPEED
+            else:
+                self._state = RUN
+                Player.SPEED = RUN_SPEED
+
+        # update image and rect
+        if self._state == RUN or self._state == DOWN:
+            self._img_index += 1
+            self._img_index %= 2 * ANIMATE
+            self.image = stick_img[self._state][self._img_index // ANIMATE]
+            self.rect.height = self.image.get_height()
+            self.rect.bottom = HEIGHT - GROUND_H
+        elif self._state == JUMP:
+            self.image = stick_img[self._state]
+            self.rect.move_ip(0, -self._speed_y)
+            self._speed_y -= GRAVITY
+            if pygame.sprite.spritecollide(self, Ground.all, False):
+                self._state = RUN
+                self._speed_y = 0
+                self.rect.bottom = HEIGHT - GROUND_H
+        self.distance += Player.SPEED
 
 
-def start():
-    File.read()
-
-    display.fill(WHITE)
-
-    while True:
-        message(display, "Jump - UP or SPACE", -2, 0, True)
-        message(display, "Crouch - DOWN", -2, 20, True)
-        message(display, "Press SPACE to start!", -2, 40, True)
-        message(display, "Press C to modify character!", -2, 60, True)
-        message(display, "Press Q to quit!", -2, 80, True)
-        pygame.display.flip()
-
-        for event in pygame.event.get():
-            if event.type == QUIT:
-                quit_all()
-            elif event.type == KEYDOWN:
-                if event.key == K_q:
-                    quit_all()
-                elif event.key == K_SPACE:
-                    main()
-                elif event.key == K_c:
-                    character()
-                if event.key == K_m:
-                    pygame.display.iconify()
-
-        clock.tick(FPS)
+def mix_color(color_a, color_b, ratio=0.5):
+    return [int(a * ratio + b * (1 - ratio)) for a, b in zip(color_a, color_b)]
 
 
-def character():
-    # loop
-    while True:
-        display.fill(WHITE)
-        message(display, "Arrow keys - adjust values; D - reset default", 0, 0)
-        message(display, "Any other key to save and return!", 0, 20)
-        Slider.show(display, 40)
-        pygame.display.flip()
-
-        for event in pygame.event.get():
-            if event.type == QUIT:
-                quit_all()
-            elif event.type == KEYDOWN:
-                if event.key == K_m:
-                    pygame.display.iconify()
-                elif event.key == K_UP or event.key == K_DOWN:
-                    Slider.focus(event.key)
-                elif event.key == K_LEFT or event.key == K_RIGHT:
-                    Slider.active.change(event.key)
-                elif event.key == K_d:
-                    Slider.reset()
-                else:
-                    File.load()
-                    display.fill(WHITE)
-                    return
-
-        clock.tick(FPS)
+def choose(dct):
+    rand = random.random()
+    bar = 0
+    for choice, chance in dct.items():
+        bar += chance
+        if rand <= bar:
+            return choice
+    raise ValueError('total possibility unreachable')
 
 
-def pause():
-    message(display, "Paused!", -1, 0)
-    message(display, "Press P to unpause!", -1, 20)
+def dialogue(display,
+             title="Dialogue",
+             msg="Please select one from the following options",
+             key_binding=None):
+
+    if key_binding is None:
+        key_binding = {K_y: "Yes", K_n: "No"}
+    surf_width = 0
+    surf_height = 0
+
+    title_bit_map = TITLE_FONT.render(title, True, BLACK)
+    title_rect = title_bit_map.get_rect()
+    if title_rect.width > surf_width:
+        surf_width = title_rect.width
+    surf_height += title_rect.height
+
+    msg_bit_map = NORMAL_FONT.render(msg, True, BLACK)
+    msg_rect = msg_bit_map.get_rect()
+    if msg_rect.width > surf_width:
+        surf_width = msg_rect.width
+    surf_height += msg_rect.height
+
+    key_bit_maps = []
+    for key, choice in key_binding.items():
+        text = choice + " : " + pygame.key.name(key)
+        text_bit_map = NORMAL_FONT.render(text, True, BLACK)
+        text_rect = text_bit_map.get_rect()
+        if text_rect.width > surf_width:
+            surf_width = text_rect.width
+        surf_height += text_rect.height
+        key_bit_maps.append((text_bit_map, text_rect))
+
+    surf = pygame.Surface((surf_width, surf_height), SRCALPHA)
+    surf.fill(TRANSP_YELLOW)
+    blit_x = 0
+    for bit_map, rect in [(title_bit_map, title_rect), (msg_bit_map, msg_rect)] + key_bit_maps:
+        rect.top = blit_x
+        rect.centerx = surf_width / 2
+        surf.blit(bit_map, rect)
+        blit_x += rect.height
+
+    surf_rect = surf.get_rect()
+    screen_size = display.get_size()
+    surf_rect.center = (screen_size[0] / 2, screen_size[1] / 2)
+
+    display.blit(surf, surf_rect)
     pygame.display.flip()
 
-    while True:
+    running = True
+    while running:
+
+        clock.tick(FPS)
+
         for event in pygame.event.get():
             if event.type == QUIT:
                 quit_all()
             elif event.type == KEYDOWN:
-                if event.key == K_q:
+                if event.key == K_q and event.mod & KMOD_META:
                     quit_all()
-                if event.key == K_p:
-                    return
-                if event.key == K_m:
-                    pygame.display.iconify()
-            elif event.type == ACTIVEEVENT:
-                if event.gain:
-                    pygame.display.flip()
+                if event.key in key_binding.keys():
+                    return key_binding.get(event.key)
 
 
 def main():
-    random.seed(time.time())
-    stick = Stick(stick_img)
-    Obstacle.family.clear()
 
-    while True:
-        if Stick.crashed():
-            message(display, "Press SPACE to retry!", 0, 20, True)
-            pygame.display.flip()
-            return
+    # preparing images
+    cactus_loc = []
+    for i in range(35):
+        x, y = random.randint(0, WIDTH), random.randint(0, HEIGHT)
+        cactus_loc.append((x, y))
+    bit_map = TITLE_FONT.render("SPACE to START!", True, BLACK)
+    text_rect = bit_map.get_rect()
+    text_rect.center = (WIDTH / 2, HEIGHT / 2)
+
+    running = True
+    while running:
+
+        clock.tick(FPS)
+
+        screen.fill(SKY)
+        for loc in cactus_loc:
+            screen.blit(cactus_img, loc)
+        screen.blit(bit_map, text_rect)
+        pygame.display.flip()
 
         for event in pygame.event.get():
-            if event.type == QUIT:
+            if event.type == pygame.QUIT:
                 quit_all()
-            elif event.type == KEYDOWN:
-                if event.key == K_q:
+            if event.type == pygame.KEYDOWN:
+                if event.key == K_q and event.mod & KMOD_META:
                     quit_all()
-                if event.key == K_p:
-                    pause()
-                if event.key == K_m:
-                    pygame.display.iconify()
+                if event.key == K_SPACE:
+                    start()
 
-        if not pygame.display.get_active():
-            pause()
 
-        key_press = pygame.key.get_pressed()
-        if key_press[K_DOWN] or key_press[K_l]:
-            if "run" in stick.act:
-                stick.act = "down1"
-        else:
-            if "down" in stick.act:
-                stick.act = "run1"
-        if key_press[K_SPACE] or key_press[K_UP] or key_press[K_o]:
-            if "run" in stick.act:
-                stick.act = "jump"
+def start():
 
-        if key_press[K_CAPSLOCK]:
-            Stick.ai()
+    global key_state, mouse_press, mouse_pos
 
-        Obstacle.renew()
-        stick.renew()
+    Sign("START")
+    Ground()
+    Ground()
+    Player()
 
-        display.fill(WHITE)
-        Obstacle.show(display)
-        stick.show(display)
-        score = "You've traveled {} screen width!".format(Stick.active.score)
-        message(display, score, 0, 0, True)
+    background = pygame.Surface((WIDTH, HEIGHT))
+    background.fill(SKY)
+    screen.blit(background, (0, 0))
 
-        pygame.display.flip()
+    running = True
+    while running:
+
         clock.tick(FPS)
+
+        GameObj.all.clear(screen, background)
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                quit_all()
+                screen.fill(SKY)
+            if event.type == pygame.KEYDOWN:
+                if event.key == K_q and event.mod & KMOD_META:
+                    quit_all()
+                    screen.fill(SKY)
+                if event.key == K_SPACE:
+                    Player.pause = not Player.pause
+
+        key_state = pygame.key.get_pressed()
+        mouse_press = pygame.mouse.get_pressed()
+        mouse_pos = pygame.mouse.get_pos()
+
+        if not Player.pause:
+            Block.gene()
+            GameObj.all.update()
+
+        if pygame.sprite.spritecollide(Player.r, Block.all, False):
+            Player.r.kill()
+            Player.r = None
+            for block in Block.all.sprites():
+                block.kill()
+            return
+
+        dirty = GameObj.all.draw(screen)
+        pygame.display.update(dirty)
 
 
 def quit_all():
-    File.write()
-    pygame.quit()
-    quit()
+    answer = dialogue(screen,
+                      title="Warning",
+                      msg="Do you really want to quit?")
+    if answer == "Yes":
+        pygame.quit()
+        sys.exit()
 
 
-start()
+main()
