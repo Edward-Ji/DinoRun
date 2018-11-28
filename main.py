@@ -6,6 +6,8 @@ import pygame
 from pygame.locals import *
 
 # pygame constants
+VER = "0.2"
+
 WIDTH = 960
 HEIGHT = 240
 FPS = 60
@@ -48,7 +50,7 @@ pygame.init()
 pygame.mixer.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 screen.fill(WHITE)
-pygame.display.set_caption("My Game")
+pygame.display.set_caption("Stick Run" + " V" + VER)
 
 clock = pygame.time.Clock()
 
@@ -65,6 +67,7 @@ stick_img = {RUN: (pygame.image.load(res("stick_run_1.png")),
                     pygame.image.load(res("stick_down_2.png"))),
              JUMP: pygame.image.load(res("stick_jump.png"))}
 cactus_img = pygame.image.load(res("cactus.png"))
+timer_img = pygame.image.load(res("timer.png"))
 
 
 class GameObj(pygame.sprite.Sprite):
@@ -74,6 +77,46 @@ class GameObj(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
         GameObj.all.add(self)
+
+
+class Button(GameObj):
+
+    all = pygame.sprite.Group()
+
+    def __init__(self):
+        pass
+
+    def update(self, *args):
+        pass
+
+
+class Timer(GameObj):
+
+    end = True
+
+    def __init__(self, limit=3):
+        super().__init__()
+        self._time = 0
+        self.image = timer_img
+        self.rect = self.image.get_rect()
+        self.rect.top = 0
+        self.rect.centerx = WIDTH / 2
+        self.limit = limit
+        Timer.end = False
+
+    def update(self):
+        real_time = self._time / FPS
+        time_left = round(self.limit - real_time)
+        bit_map = NORMAL_FONT.render(str(time_left), True, WHITE)
+        text_rect = bit_map.get_rect()
+        text_rect.center = (self.rect.width / 2, self.rect.height / 2)
+        self.image = pygame.Surface(timer_img.get_size(), SRCALPHA)
+        self.image.blit(timer_img, (0, 0))
+        self.image.blit(bit_map, text_rect)
+        if time_left <= 0:
+            Timer.end = True
+            self.kill()
+        self._time += 1
 
 
 class Sign(GameObj):
@@ -192,10 +235,10 @@ class Player(GameObj):
 
         # control
         if self._state != JUMP:
-            if key_state[K_UP]:
+            if key_state[K_UP] or key_state[K_w]:
                 self._state = JUMP
                 self._speed_y = Player.JUMP_POWER
-            elif key_state[K_DOWN]:
+            elif key_state[K_DOWN] or key_state[K_s]:
                 self._state = DOWN
                 Player.SPEED = DOWN_SPEED
             else:
@@ -326,7 +369,13 @@ def main():
                 if event.key == K_q and event.mod & KMOD_META:
                     quit_all()
                 if event.key == K_SPACE:
-                    start()
+                    answer = "Retry"
+                    while answer == "Retry":
+                        score = start()
+                        answer = dialogue(screen,
+                                          "Play again?",
+                                          "You got " + str(score) + " points in your last run!",
+                                          {K_SPACE: "Retry", K_q: "Main Menu"})
 
 
 def start():
@@ -337,43 +386,62 @@ def start():
     Ground()
     Ground()
     Player()
+    timer = Timer()
+
+    pause_text = NORMAL_FONT.render("PAUSED", True, BLACK)
+    pause_rect = pause_text.get_rect()
+    pause_rect.topleft = (10, 10)
 
     background = pygame.Surface((WIDTH, HEIGHT))
     background.fill(SKY)
     screen.blit(background, (0, 0))
+
+    Player.pause = False
 
     running = True
     while running:
 
         clock.tick(FPS)
 
-        GameObj.all.clear(screen, background)
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 quit_all()
-                screen.fill(SKY)
+                timer.kill()
+                timer = Timer()
             if event.type == pygame.KEYDOWN:
                 if event.key == K_q and event.mod & KMOD_META:
                     quit_all()
-                    screen.fill(SKY)
+                    timer.kill()
+                    timer = Timer()
                 if event.key == K_SPACE:
                     Player.pause = not Player.pause
+                    if Player.pause:
+                        timer.kill()
+                        timer = Timer()
 
         key_state = pygame.key.get_pressed()
         mouse_press = pygame.mouse.get_pressed()
         mouse_pos = pygame.mouse.get_pos()
 
-        if not Player.pause:
+        screen.fill(SKY)
+
+        if Player.pause:
+            screen.blit(pause_text, pause_rect)
+        elif Timer.end:
             Block.gene()
             GameObj.all.update()
+        else:
+            timer.update()
 
         if pygame.sprite.spritecollide(Player.r, Block.all, False):
+            score = Player.r.distance
             Player.r.kill()
             Player.r = None
             for block in Block.all.sprites():
                 block.kill()
-            return
+            if not Timer.end:
+                timer.kill()
+            return score
 
         dirty = GameObj.all.draw(screen)
         pygame.display.update(dirty)
@@ -386,6 +454,8 @@ def quit_all():
     if answer == "Yes":
         pygame.quit()
         sys.exit()
+    else:
+        Player.pause = True
 
 
 main()
